@@ -29,6 +29,9 @@ extern "C" {
 #include "GradientPalettes.h"
 #include "Field.h"
 
+#include <PubSubClient.h>                   //Include the MQTT Library
+#include <ArduinoJson.h>                    //Include the JSON library for use with MQTT
+
 
 
 /*######################## MAIN CONFIG ########################*/
@@ -53,6 +56,11 @@ const bool apMode = false;        // set to true if the esp8266 should open an a
 #define RANDOM_AUTOPLAY_PATTERN   // if enabled the next pattern for autoplay is choosen at random, 
                                   // if commented out patterns will play in order
 #define ENABLE_ALEXA_SUPPORT      // Espalexa library required
+#define ENABLE_MQTT_SUPPORT       // Enable MQTT library support
+#define MQTT_TOPIC "homeassistant/light/nanoleafs"          // MQTT Topic to Publish to (Home Assistant)
+#define MQTT_TOPIC_SET "homeassistant/light/nanoleafs/set"  // MQTT Topic to subscribe to (Home Assistant)
+#define MQTT_MAX_PACKET_SIZE 1024
+#define MQTT_MAX_TRANSFER_SIZE 1024
 
 /*######################## MAIN CONFIG END ####################*/
 
@@ -84,6 +92,14 @@ const bool apMode = false;        // set to true if the esp8266 should open an a
 #endif // ENABLE_ALEXA_SUPPORT
  /*########## Alexa Configuration END ##########*/
 
+/*########### MQTT Configuration ##################*/
+const char* mqttServer = "homeassistant.local";
+const int mqttPort = 1883;
+// For the user / password check the Secrets.h file and append at the end of it.
+// const char* mqttUser = "YourMqttUser";
+// const char* mqttPassword = "YourMqttUserPassword";
+
+/*########### MQTT Configuration END ##################*/
 
 
 ESP8266WebServer webServer(80);
@@ -265,6 +281,11 @@ const String paletteNames[paletteCount] = {
 
 #include "Fields.h"
 
+#ifdef ENABLE_MQTT_SUPPORT
+  WiFiClient espClient;
+  PubSubClient mqttClient(espClient);
+#endif
+
 void setup() {
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
 #ifdef SOUND_REACTIVE
@@ -344,7 +365,7 @@ void setup() {
     WiFi.softAP(AP_NameChar, WiFiAPPSK);
 
     Serial.printf("Connect to Wi-Fi access point: %s\n", AP_NameChar);
-    Serial.println("and open http://192.168.4.1 in your browser");
+    Serial.println("and open http://192.168.4.1 in your browser \n");
   }
   else
   {
@@ -616,6 +637,8 @@ void broadcastString(String name, String value)
 }
 
 void loop() {
+
+  mqttClient.loop();
   // Add entropy to random number generator; we use a lot of it.
   random16_add_entropy(random(65535));
 
@@ -646,6 +669,66 @@ void loop() {
       Serial.print("Connected! Open http://");
       Serial.print(WiFi.localIP());
       Serial.println(" in your browser");
+    }
+  }
+
+  static bool mqttConnected = false;
+  EVERY_N_SECONDS(10) {
+    if (!mqttClient.connected()) {
+      mqttClient.setServer(mqttServer, mqttPort);
+      mqttClient.setCallback(mqttCallback); 
+      mqttConnected = false;
+    } else {
+      sendStatus();
+    }
+    if (!mqttConnected) {
+      mqttConnected = true;
+
+      Serial.println("Connecting to MQTT...");
+      if (mqttClient.connect(HOSTNAME, mqttUser, mqttPassword )) {
+        Serial.println("connected \n");  
+
+        Serial.println("Subscribing to MQTT Topics \n");
+        mqttClient.subscribe(MQTT_TOPIC "/set");
+
+        StaticJsonDocument<1024> JSONencoder;
+        JSONencoder["~"] = MQTT_TOPIC,
+        JSONencoder["name"] = "Nanoleafs",
+        JSONencoder["device"]["identifiers"] = "livingroom_nanoleafs",
+        JSONencoder["device"]["manufacturer"] = "WD DIY",
+        JSONencoder["device"]["model"] = "0.1",
+        JSONencoder["device"]["name"] = "DIY Nanoleafs",
+        JSONencoder["state_topic"] = "~",
+        JSONencoder["command_topic"] = "~/set",
+        JSONencoder["brightness"] = true,
+        JSONencoder["rgb"] = true,
+        JSONencoder["effect"] = true,
+        JSONencoder["uniq_id"] = "livingroom_nanoleafs",
+        JSONencoder["schema"] = "json";
+
+        JsonArray effect_list = JSONencoder.createNestedArray("effect_list");
+        for (uint8_t i = 0; i < patternCount; i++) {
+          effect_list.add(patterns[i].name);
+        }
+
+        char JSONmessage[1024];
+        size_t n = serializeJson(JSONencoder, JSONmessage);
+        
+        if (mqttClient.beginPublish(MQTT_TOPIC "/config", n, true) == true) {
+            Serial.println("Configuration Publishing Begun");
+            if (mqttClient.print(JSONmessage) == true) {
+              Serial.println("Configuration Sent");
+            }
+            if (mqttClient.endPublish() == true) {
+              Serial.println("Configuration Publishing Finished");
+            }
+        } else {
+          Serial.println("Error sending Configuration");
+        }
+      } else {
+        Serial.print("failed with state ");
+        Serial.print(mqttClient.state());
+      }
     }
   }
 
@@ -724,7 +807,64 @@ void loop() {
 //  }
 //}
 
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  StaticJsonDocument<256> doc;
+  deserializeJson(doc, payload, length);
 
+  JsonObject obj = doc.as<JsonObject>();
+  for (JsonPair p : obj) {
+    const char* key = p.key().c_str();
+    JsonVariant v = p.value();
+    String value = v.as<String>();  //Delete
+    Serial.println(key);            //Delete
+    Serial.println(value);          //Delete
+    
+    if (strcmp(key,"state")==0){
+      String val = v.as<String>();
+      setPower((val=="ON")?1:0);
+    }
+    if (strcmp(key,"brightness")==0){
+      int val = v.as<int>();
+      setBrightness(val);
+    }
+    if (strcmp(key,"effect")==0){
+      String val = v.as<String>();
+      setPatternName(val);
+    }
+    if (strcmp(key,"color")==0){
+      int cr,cb,cg;
+      JsonObject val = v.as<JsonObject>();
+      for (JsonPair o : val) {
+        const char* ckey = o.key().c_str();
+        JsonVariant cv = o.value();        
+        if (strcmp(ckey,"r")==0){
+          cr = cv.as<int>();
+        }
+        if (strcmp(ckey,"g")==0){
+          cg = cv.as<int>();
+        }
+        if (strcmp(ckey,"b")==0){
+          cb = cv.as<int>();
+        }
+      }
+      setSolidColor(cr,cg,cb);
+    }
+  }
+  sendStatus();
+}
+
+void sendStatus()
+{
+  StaticJsonDocument<128> JSONencoder;
+  JSONencoder["state"] = (power==1?"ON":"OFF"),
+  JSONencoder["brightness"] = brightness,
+  JSONencoder["effect"] = patterns[currentPatternIndex].name,
+  JSONencoder["QoS"] = 2;
+
+  char JSONmessage[128];
+  size_t n = serializeJson(JSONencoder, JSONmessage);
+  mqttClient.publish(MQTT_TOPIC,JSONmessage,n,true);
+}
 
 void loadSettings()
 {
