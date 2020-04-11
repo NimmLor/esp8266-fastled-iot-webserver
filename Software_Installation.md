@@ -71,8 +71,12 @@ For beginners I would recommend watching this setup tutorial below.
    // Wi-Fi network to connect to (if not in AP mode)
     char* ssid = "your-ssid";
     char* password = "your-password";
+
+   // MQTT user / password
+     const char* mqttUser = "your-mqtt-user";
+     const char* mqttPassword = "your-mqtt-password";
    ```
-   
+
    ![](software_screenshots/secret.png?raw=true)
 
 5. Configure the parameters
@@ -107,7 +111,12 @@ For beginners I would recommend watching this setup tutorial below.
 ![](software_screenshots/alexa_config.png?raw=true)
 
 
+7. (Optional) Configure MQTT
 
+-  Installation of "PubSubClient" and "ArduinoJson" libraries required
+-  Requires `ENABLE_MQTT_SUPPORT`
+-  It's preconfigured for Home Assistant Mosquitto MQTT service
+-  Enables sync with home assistant and from there to Google Assistant
 
 
 ## 3. Upload
