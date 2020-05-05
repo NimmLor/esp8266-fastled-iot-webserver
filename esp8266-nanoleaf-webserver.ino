@@ -33,24 +33,26 @@ extern "C" {
 
 /*######################## MAIN CONFIG ########################*/
 #define DATA_PIN      D4          // Should be GPIO02 on other boards like the NodeMCU
-#define LED_TYPE      WS2812B     // You might also use a WS2811 or any other strip that is fastled compatible 
+#define LED_TYPE      WS2812B     // You might also use a WS2811 or any other strip that is fastled compatible
 #define COLOR_ORDER   GRB         // Change this if colors are swapped (in my case, red was swapped with green)
 #define MILLI_AMPS    5000        // IMPORTANT: set the max milli-Amps of your power supply (4A = 4000mA)
 #define VOLTS         5           // Voltage of the Power Supply
 
-#define LEAFCOUNT 12              // Amount of triangles
-#define PIXELS_PER_LEAF 12        // Amount of LEDs inside 1x Tringle
+#define LEAFCOUNT 16              // Amount of triangles
+#define PIXELS_PER_LEAF 6        // Amount of LEDs inside 1x Tringle
 
 const bool apMode = false;        // set to true if the esp8266 should open an access point
 
-//#define SOUND_REACTIVE            // Uncomment to enable the Sound reactive mode
+#define SOUND_REACTIVE            // Uncomment to enable the Sound reactive mode
 #define SOUND_SENSOR_PIN A0       // An Analog sensor should be connected to an analog pin
 #define SENSOR_TYPE 1             // 0: Dumb Sensors, 1: MAX4466 Sound Sensor, 2: MAX9814 Sound Sensor
+int16_t audioMinVol = 135;        // minimal Voltage from Mic, higher Value = less sensitive
+int16_t audioMaxVol = 145;        // maximal Voltage from Mic, lower Value = more LED on with lower Volume
 
 #define HOSTNAME "Nanoleafs"      // Name that appears in your network
 #define CORRECTION UncorrectedColor       // If colors are weird use TypicalLEDStrip
 
-#define RANDOM_AUTOPLAY_PATTERN   // if enabled the next pattern for autoplay is choosen at random, 
+#define RANDOM_AUTOPLAY_PATTERN   // if enabled the next pattern for autoplay is choosen at random,
                                   // if commented out patterns will play in order
 #define ENABLE_ALEXA_SUPPORT      // Espalexa library required
 
@@ -76,6 +78,7 @@ const bool apMode = false;        // set to true if the esp8266 should open an a
 #define AddAutoplayDevice           "Nanoleafs Autoplay"
 #define AddStrobeDevice             "Nanoleafs Strobe"
 #define AddSpecificPatternDevice    "Nanoleafs Party"
+#define AddAudioDevice              "Nanoleafs Audio"
 
 
 #ifdef AddSpecificPatternDevice
@@ -373,6 +376,9 @@ void setup() {
 #ifdef AddSpecificPatternDevice
   espalexa.addDevice(AddSpecificPatternDevice, AlexaSpecificEvent, EspalexaDeviceType::onoff); //non-dimmable device
 #endif
+#ifdef AddAudioDevice
+  espalexa.addDevice(AddAudioDevice, AlexaAudioEvent, EspalexaDeviceType::onoff); //non-dimmable device
+#endif
 
 
   webServer.onNotFound([]() {
@@ -649,7 +655,7 @@ void loop() {
       Serial.println(" in your browser \n");
       if (!MDNS.begin(HOSTNAME)) {
         Serial.println("Error setting up MDNS responder! \n");
-      } else {  
+      } else {
         Serial.println("mDNS responder started \n");
         MDNS.addService("http", "tcp", 80);
       }
@@ -1522,15 +1528,18 @@ void soundReactive()
   for (int it = 0; it < 5; it++)
   {
     int m = analogRead(SOUND_SENSOR_PIN);
+
     m -= 800;
     m *= -1;
-    if (m < 100)m = 0;
+    //if (m < 100)m = 0;
+    if (m < 150) m = 0;
     measure += m;
   }
   measure /= 5;
   measure /= 2;  // cut the volts in half
 #endif
   //Serial.println(measure);
+
   iter++;
   if (iter > arrsize)iter = 0;
   measure8avg[iter] = measure;
@@ -1543,7 +1552,7 @@ void soundReactive()
 
   avg = measure;
 
-  int mlevel = map(avg, 30, 300, 1, NUM_LEDS);
+  int mlevel = map(avg, audioMinVol, audioMaxVol, 1, NUM_LEDS);
   if (mlevel < 1)mlevel = 1;
   //if (lastlevel > mlevel) level = lastlevel  - 0.8;
   //else if (lastlevel < mlevel) level = lastlevel+1;
@@ -1584,7 +1593,7 @@ void mainAlexaEvent(EspalexaDevice* d) {
   lb = d->getB();
 }
 
-#ifdef AddStrobeDevice 
+#ifdef AddStrobeDevice
 void AlexaStrobeEvent(EspalexaDevice* d) {
   if (d == nullptr) return;
 
@@ -1612,6 +1621,7 @@ void AlexaStrobeEvent(EspalexaDevice* d) {
 
 }
 #endif
+
 #ifdef AddAutoplayDevice
 void AlexaAutoplayEvent(EspalexaDevice* d) {
   if (d == nullptr) return;
@@ -1624,6 +1634,7 @@ void AlexaAutoplayEvent(EspalexaDevice* d) {
   else setAutoplay(0);
 }
 #endif
+
 #ifdef AddSpecificPatternDevice
 void AlexaSpecificEvent(EspalexaDevice* d) {
   if (d == nullptr) return;
@@ -1632,4 +1643,16 @@ void AlexaSpecificEvent(EspalexaDevice* d) {
   else setPattern(patternCount - 1);
 }
 #endif
+
+#ifdef AddAudioDevice
+void AlexaAudioEvent(EspalexaDevice* d) {
+  if (d == nullptr) return;
+
+  Serial.print("Alexa Audio update: rgb: "); Serial.print(d->getR() + d->getG() + d->getB()); Serial.print(", b: "); Serial.println(d->getValue());
+  if (d->getValue() != 0)setPattern(patternCount - 2);
+  else setPattern(patternCount - 1);
+
+}
+#endif
+
 #endif
