@@ -61,7 +61,9 @@ extern "C" {
 /*######################## MAIN CONFIG ########################*/
 #define LED_TYPE            WS2812B                     // You might also use a WS2811 or any other strip that is Fastled compatible 
 #define DATA_PIN            D3                          // Be aware: the pin mapping might be different on boards like the NodeMCU
-//#define CLK_PIN             D5                        // Only required when using 4-pin SPI-based LEDs
+//#define CLK_PIN           D5                          // Only required when using 4-pin SPI-based LEDs
+#define MOSFET_PIN          D4                          // Pin for a MOSFET, can be used to physical power off the LED stripe
+#define MOSFET_LEVEL        (HIGH)                      // logic level for LED state 'on'
 #define CORRECTION          UncorrectedColor            // If colors are weird use TypicalLEDStrip
 #define COLOR_ORDER         GRB                         // Change this if colors are swapped (in my case, red was swapped with green)
 #define MILLI_AMPS          10000                       // IMPORTANT: set the max milli-Amps of your power supply (4A = 4000mA)
@@ -738,6 +740,11 @@ void setup() {
     pinMode(SOUND_SENSOR_PIN, INPUT);
 #endif
 #endif // SOUND_REACTIVE
+
+#if defined(MOSFET_PIN) && defined(MOSFET_LEVEL)           
+    pinMode(MOSFET_PIN, OUTPUT);
+    digitalWrite(MOSFET_PIN, power == 1 ? MOSFET_LEVEL : !MOSFET_LEVEL);
+#endif
 
     // starting file system
     if (!SPIFFS.begin ()) {
@@ -1691,6 +1698,10 @@ void setPower(uint8_t value)
     setConfigChanged();
     SERIAL_DEBUG_LNF("Setting: power %s", (power == 0) ? "off" : "on")
     broadcastInt("power", power);
+
+    #if defined(MOSFET_PIN) && defined(MOSFET_LEVEL)
+        digitalWrite(MOSFET_PIN, power == 1 ? MOSFET_LEVEL : !MOSFET_LEVEL);
+    #endif
 }
 
 void setAutoplay(uint8_t value)
